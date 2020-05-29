@@ -1,8 +1,8 @@
-import matplotlib.pyplot as plt
-
 import os
-import typing
 import re
+import typing
+
+import matplotlib.pyplot as plt
 
 
 class LearningModel:
@@ -88,6 +88,7 @@ class LearningModel:
         retrain_loss_amount: float = 10,
         test_type: typing.Union["steps", "dones"] = "dones",
         test_size: int = 10 ** 4,
+        reload_previous_max_amount: int = 5,
     ):
         result = self._test_epoch(
             test_type=test_type, test_num=self.current_epoch - 1, steps_amount=test_size
@@ -97,6 +98,7 @@ class LearningModel:
 
         for epoch in range(self.current_epoch, epoches):
             print(f"Epoch {epoch}")
+            reload_amount = 0
             while True:
                 max_epoch_test_reward_num, max_epoch_test_reward = max(
                     self._epoch_tests.items(), key=lambda x: x[1]
@@ -112,7 +114,7 @@ class LearningModel:
 
                 print(f"Epoch {epoch} result: {test_result}")
 
-                if not retrain_on_test_down:
+                if not retrain_on_test_down or epoch == 1:
                     break
 
                 if (
@@ -121,6 +123,8 @@ class LearningModel:
                     or test_result > max_epoch_test_reward
                 ):
                     break
+
+                reload_amount += 1
 
                 print(
                     f"Current maximum test value is for epoch {max_epoch_test_reward_num}: {max_epoch_test_reward}"
@@ -135,11 +139,18 @@ class LearningModel:
                     ]
                 )
 
-                self.model = self.algorithm.load(
-                    os.path.join(directory, f"{max_epoch_test_reward_num}.pkl"),
-                    env=self.environment,
-                )
-                print(f"Reloaded {max_epoch_test_reward_num}.pkl")
+                if reload_amount < reload_previous_max_amount:
+                    self.model = self.algorithm.load(
+                        os.path.join(directory, f"{epoch-1}.pkl"), env=self.environment,
+                    )
+                    print(f"Reloaded previous {epoch-1}.pkl")
+                else:
+                    self.model = self.algorithm.load(
+                        os.path.join(directory, f"{max_epoch_test_reward_num}.pkl"),
+                        env=self.environment,
+                    )
+                    reload_amount = 0
+                    print(f"Reloaded current best {max_epoch_test_reward_num}.pkl")
 
     def _train_epoch(
         self, epoch_num: int, epoch_size: int, save_location: typing.Union[str, None],
