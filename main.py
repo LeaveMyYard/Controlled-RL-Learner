@@ -24,7 +24,9 @@ def main():
         reward_preprocess_function=lambda x: x / n_cpu,
     )
 
-    learner.launch(train_size=10 ** 6, retrain_loss_amount=14)
+    learner.launch(
+        train_size=10 ** 7, retrain_loss_amount=14, test_type="dones", test_epoches=6
+    )
 
 
 if __name__ == "__main__":
