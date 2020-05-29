@@ -84,14 +84,18 @@ class LearningModel:
         verbose: int = 0,
         train_size: int = 10 ** 6,
         epoches: int = 1000,
-        retrain_on_test_down: bool = True,
+        retrain_on_test_down: bool = False,
         retrain_loss_amount: float = 10,
         test_type: typing.Union["steps", "dones"] = "dones",
         test_size: int = 10 ** 4,
+        test_epoches: int = 1,
         reload_previous_max_amount: int = 5,
     ):
         result = self._test_epoch(
-            test_type=test_type, test_num=self.current_epoch - 1, steps_amount=test_size
+            test_type=test_type,
+            test_num=self.current_epoch - 1,
+            steps_amount=test_size,
+            test_epoches=test_epoches,
         )
 
         print(f"Initial testing result: {result}")
@@ -109,7 +113,10 @@ class LearningModel:
                     save_location=self.save_location,
                 )
                 test_result = self._test_epoch(
-                    test_type=test_type, test_num=epoch, steps_amount=test_size
+                    test_type=test_type,
+                    test_num=epoch,
+                    steps_amount=test_size,
+                    test_epoches=test_epoches,
                 )
 
                 print(f"Epoch {epoch} result: {test_result}")
@@ -127,7 +134,8 @@ class LearningModel:
                 reload_amount += 1
 
                 print(
-                    f"Current maximum test value is for epoch {max_epoch_test_reward_num}: {max_epoch_test_reward}"
+                    "Current maximum test value is for epoch"
+                    + f" {max_epoch_test_reward_num}: {max_epoch_test_reward}"
                 )
 
                 directory = os.path.join(
@@ -177,11 +185,28 @@ class LearningModel:
         test_type: typing.Union["steps", "dones"],
         test_num: typing.Union[int, None] = None,
         steps_amount: int = 1000,
+        test_epoches: int = 1,
     ) -> float:
         if test_type == "steps":
-            return self.__test_epoch_steps_type(steps_amount, test_num)
+            return (
+                sum(
+                    [
+                        self.__test_epoch_steps_type(steps_amount, test_num)
+                        for _ in range(test_epoches)
+                    ]
+                )
+                / test_epoches
+            )
         if test_type == "dones":
-            return self.__test_epoch_dones_type(test_num)
+            return (
+                sum(
+                    [
+                        self.__test_epoch_dones_type(test_num)
+                        for _ in range(test_epoches)
+                    ]
+                )
+                / test_epoches
+            )
 
         raise ValueError(
             f"test_type setting only accepts 'steps' or 'dones' type, but {test_type} was given"
