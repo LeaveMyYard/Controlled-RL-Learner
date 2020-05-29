@@ -24,7 +24,7 @@ def main():
 
     print("Initial testing...")
 
-    model = PPO2.load("./results/85.pkl", env)
+    model = PPO2.load("./results/Pacman_Resized_4Frames/PPO2/CnnPolicy/93.pkl", env)
 
     # Enjoy trained agent
     obs = env.reset()

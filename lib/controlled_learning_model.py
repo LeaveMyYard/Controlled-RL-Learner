@@ -21,6 +21,7 @@ class LearningModel:
         policy_kwargs: typing.Dict = None,
         load_saved: bool = True,
         save_location: typing.Union[str, None] = None,
+        reward_preprocess_function: typing.Callable[[float], float] = lambda x: x,
     ):
         self.environment = environment
         self.algorithm = algorithm
@@ -29,6 +30,7 @@ class LearningModel:
         self.save_location = save_location
 
         self.current_epoch = 1
+        self.__reward_preprocess_function = reward_preprocess_function
 
         loaded = False
         if load_saved:
@@ -75,7 +77,7 @@ class LearningModel:
 
     @staticmethod
     def __percentage_difference(a: float, b: float) -> float:
-        return abs((a - b) / ((a + b) / 2)) * 100 if b not in (a, 0) else 0
+        return abs((a - b) / a) * 100 if b not in (a, 0) else 0
 
     def launch(
         self,
@@ -83,16 +85,22 @@ class LearningModel:
         train_size: int = 10 ** 6,
         epoches: int = 1000,
         retrain_on_test_down: bool = True,
-        retrain_loss_amount: float = 0.2,
+        retrain_loss_amount: float = 10,
         test_type: typing.Union["steps", "dones"] = "dones",
         test_size: int = 10 ** 4,
     ):
-        self._test_epoch(test_type=test_type, test_num=0, steps_amount=test_size)
+        result = self._test_epoch(
+            test_type=test_type, test_num=self.current_epoch - 1, steps_amount=test_size
+        )
+
+        print(f"Initial testing result: {result}")
 
         for epoch in range(self.current_epoch, epoches):
             print(f"Epoch {epoch}")
             while True:
-                max_epoch_test_reward = max(self._epoch_tests.values())
+                max_epoch_test_reward_num, max_epoch_test_reward = max(
+                    self._epoch_tests.items(), key=lambda x: x[1]
+                )
                 self._train_epoch(
                     epoch_num=epoch,
                     epoch_size=train_size,
@@ -102,15 +110,36 @@ class LearningModel:
                     test_type=test_type, test_num=epoch, steps_amount=test_size
                 )
 
+                print(f"Epoch {epoch} result: {test_result}")
+
                 if not retrain_on_test_down:
                     break
 
                 if (
                     self.__percentage_difference(test_result, max_epoch_test_reward)
-                    >= retrain_loss_amount
-                    and test_result < max_epoch_test_reward
+                    < retrain_loss_amount
+                    or test_result > max_epoch_test_reward
                 ):
                     break
+
+                print(
+                    f"Current maximum test value is for epoch {max_epoch_test_reward_num}: {max_epoch_test_reward}"
+                )
+
+                directory = os.path.join(
+                    *[
+                        "results",
+                        self.save_location,
+                        self.algorithm.__name__,
+                        self.policy.__name__,
+                    ]
+                )
+
+                self.model = self.algorithm.load(
+                    os.path.join(directory, f"{max_epoch_test_reward_num}.pkl"),
+                    env=self.environment,
+                )
+                print(f"Reloaded {max_epoch_test_reward_num}.pkl")
 
     def _train_epoch(
         self, epoch_num: int, epoch_size: int, save_location: typing.Union[str, None],
@@ -154,21 +183,23 @@ class LearningModel:
 
         dones = None
 
-        while dones is not None and not all(dones):
+        while dones is None or not all(dones):
             action, _states = self.model.predict(obs)
             obs, rewards, current_dones, _ = self.environment.step(action)
 
             if dones is None:
                 dones = current_dones
 
-            for i in range(len(current_dones)):
-                dones[i] = dones[i] or current_dones[i]
+            for i, current_done in enumerate(current_dones):
+                dones[i] = dones[i] or current_done
 
             for reward, done in zip(rewards, dones):
                 if not done:
                     reward_total += reward
 
             self.environment.render()
+
+        reward_total = self.__reward_preprocess_function(reward_total)
 
         if test_num is not None:
             self._epoch_tests[test_num] = reward_total
@@ -191,6 +222,8 @@ class LearningModel:
             obs, rewards, _, _ = self.environment.step(action)
             reward_total += sum(rewards)
             self.environment.render()
+
+        reward_total = self.__reward_preprocess_function(reward_total)
 
         if test_num is not None:
             self._epoch_tests[test_num] = reward_total

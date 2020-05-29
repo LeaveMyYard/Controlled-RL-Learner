@@ -17,10 +17,14 @@ def main():
     env = SubprocVecEnv([Pacman for i in range(n_cpu)])
 
     learner = LearningModel(
-        env, PPO2, policies.CnnPolicy, save_location="Pacman_Resized_4Frames"
+        env,
+        PPO2,
+        policies.CnnPolicy,
+        save_location="Pacman_Resized_4Frames",
+        reward_preprocess_function=lambda x: x / n_cpu,
     )
 
-    learner.launch()
+    learner.launch(train_size=10 ** 6, retrain_loss_amount=14)
 
 
 if __name__ == "__main__":
