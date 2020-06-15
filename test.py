@@ -6,7 +6,7 @@ import numpy as np
 import stable_baselines.common.policies as policies
 from stable_baselines.common.vec_env import SubprocVecEnv, DummyVecEnv
 from stable_baselines import PPO2
-from custom_gym_env import Pacman
+from custom_gym_env import SpaceInvaders
 
 
 def main():
@@ -14,7 +14,7 @@ def main():
     n_cpu = 1
     env = SubprocVecEnv(
         [
-            lambda: gym.wrappers.Monitor(Pacman(), "./videos", force=True)
+            lambda: gym.wrappers.Monitor(SpaceInvaders(), "./videos", force=True)
             for i in range(n_cpu)
         ]
     )
@@ -24,7 +24,7 @@ def main():
 
     print("Initial testing...")
 
-    model = PPO2.load("./results/Pacman_Resized_4Frames/PPO2/CnnPolicy/93.pkl", env)
+    model = PPO2.load("./results/SpaceInvaders_4Frames/PPO2/CnnPolicy/1.pkl", env)
 
     # Enjoy trained agent
     obs = env.reset()
