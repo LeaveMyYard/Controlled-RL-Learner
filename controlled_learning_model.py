@@ -1,8 +1,12 @@
 import os
 import re
+import pickle
 import typing
 
+import numpy as np
+
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 
 class LearningModel:
@@ -39,7 +43,7 @@ class LearningModel:
                     f"If load_saved is True you have to provide save_location"
                 )
 
-            directory = os.path.join(
+            self._directory = os.path.join(
                 *[
                     "results",
                     save_location,
@@ -48,22 +52,28 @@ class LearningModel:
                 ]
             )
 
-            if os.path.exists(directory):
+            if os.path.exists(self._directory):
                 files = [
                     int(f[:-4])
-                    for f in os.listdir(directory)
-                    if os.path.isfile(os.path.join(directory, f))
+                    for f in os.listdir(self._directory)
+                    if os.path.isfile(os.path.join(self._directory, f))
                     and re.search(r"^\d+.pkl$", f) is not None
                 ]
 
                 if files != []:
                     self.model = self.algorithm.load(
-                        os.path.join(directory, f"{max(files)}.pkl"),
+                        os.path.join(self._directory, f"{max(files)}.pkl"),
                         env=self.environment,
                     )
                     print(f"Loaded {max(files)}.pkl")
                     loaded = True
                     self.current_epoch = max(files) + 1
+
+                try:
+                    with open(os.path.join(self._directory, "data.pickle"), "rb") as f:
+                        self._epoch_tests = pickle.load(f)
+                except OSError:
+                    self._epoch_tests = {}
 
         if not loaded:
             if policy_kwargs is not None:
@@ -72,8 +82,6 @@ class LearningModel:
                 )
             else:
                 self.model = self.algorithm(self.policy, self.environment, verbose=1)
-
-        self._epoch_tests = {}
 
     @staticmethod
     def __percentage_difference(a: float, b: float) -> float:
@@ -86,7 +94,7 @@ class LearningModel:
         epoches: int = 1000,
         retrain_on_test_down: bool = False,
         retrain_loss_amount: float = 10,
-        test_type: typing.Union["steps", "dones"] = "dones",
+        test_type: str = "dones",
         test_size: int = 10 ** 4,
         test_epoches: int = 1,
         reload_previous_max_amount: int = 5,
@@ -166,19 +174,10 @@ class LearningModel:
         self.model.learn(epoch_size)
 
         if save_location is not None:
-            directory = os.path.join(
-                *[
-                    "results",
-                    save_location,
-                    self.algorithm.__name__,
-                    self.policy.__name__,
-                ]
-            )
+            if not os.path.exists(self._directory):
+                os.makedirs(self._directory)
 
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-
-            self.model.save(os.path.join(directory, f"{epoch_num}.pkl"))
+            self.model.save(os.path.join(self._directory, f"{epoch_num}.pkl"))
 
     def _test_epoch(
         self,
@@ -187,8 +186,9 @@ class LearningModel:
         steps_amount: int = 1000,
         test_epoches: int = 1,
     ) -> float:
+        print("Running test...")
         if test_type == "steps":
-            return (
+            reward_total = (
                 sum(
                     [
                         self.__test_epoch_steps_type(steps_amount, test_num)
@@ -197,8 +197,8 @@ class LearningModel:
                 )
                 / test_epoches
             )
-        if test_type == "dones":
-            return (
+        elif test_type == "dones":
+            reward_total = (
                 sum(
                     [
                         self.__test_epoch_dones_type(test_num)
@@ -207,10 +207,22 @@ class LearningModel:
                 )
                 / test_epoches
             )
+        else:
+            raise ValueError(
+                f"test_type setting only accepts 'steps' or 'dones' type, but {test_type} was given"
+            )
 
-        raise ValueError(
-            f"test_type setting only accepts 'steps' or 'dones' type, but {test_type} was given"
-        )
+        if test_num is not None:
+            self._epoch_tests[test_num] = reward_total
+
+            with open(os.path.join(self._directory, "data.pickle"), "wb") as f:
+                pickle.dump(self._epoch_tests, f)
+
+        plt.clf()
+        plt.plot(list(self._epoch_tests.keys()), list(self._epoch_tests.values()))
+        plt.gcf().savefig(os.path.join(self._directory, "plot.png"))
+
+        return reward_total
 
     def __test_epoch_dones_type(self, test_num) -> float:
         obs = self.environment.reset()
@@ -220,8 +232,13 @@ class LearningModel:
         dones = None
 
         while dones is None or not all(dones):
+            t = datetime.now()
+            timer = {}
+
             action, _states = self.model.predict(obs)
+            timer["predict"] = (datetime.now() - t).total_seconds()
             obs, rewards, current_dones, _ = self.environment.step(action)
+            timer["step"] = (datetime.now() - t).total_seconds() - timer["predict"]
 
             if dones is None:
                 dones = current_dones
@@ -233,18 +250,19 @@ class LearningModel:
                 if not done:
                     reward_total += reward
 
-            self.environment.render()
+            timer["other"] = (
+                (datetime.now() - t).total_seconds() - timer["predict"] - timer["step"]
+            )
 
-        reward_total = self.__reward_preprocess_function(reward_total)
+            # self.environment.render()
+            timer["FPS"] = 1 / (datetime.now() - t).total_seconds()
 
-        if test_num is not None:
-            self._epoch_tests[test_num] = reward_total
+            print(
+                f"\rFPS: {round(timer['FPS'], 4)},\tpredict: {round(timer['predict'], 4)},\tstep: {round(timer['step'], 4)},\tother: {round(timer['other'], 4)}\t[{100 * np.sum(dones) / len(dones)}%]",
+                end="              ",
+            )
 
-        plt.clf()
-        plt.plot(list(self._epoch_tests.keys()), list(self._epoch_tests.values()))
-        plt.gcf().savefig("plot.png")
-
-        return reward_total
+        return self.__reward_preprocess_function(reward_total)
 
     def __test_epoch_steps_type(
         self, steps_amount: int, test_num: typing.Union[int, None] = None
@@ -253,19 +271,26 @@ class LearningModel:
 
         reward_total = 0
 
-        for _ in range(steps_amount):
+        for i in range(steps_amount):
+            t = datetime.now()
+            timer = {}
+
             action, _states = self.model.predict(obs)
+            timer["predict"] = (datetime.now() - t).total_seconds()
             obs, rewards, _, _ = self.environment.step(action)
+            timer["step"] = (datetime.now() - t).total_seconds() - timer["predict"]
             reward_total += sum(rewards)
-            self.environment.render()
+            timer["other"] = (
+                (datetime.now() - t).total_seconds() - timer["predict"] - timer["step"]
+            )
 
-        reward_total = self.__reward_preprocess_function(reward_total)
+            # self.environment.render()
 
-        if test_num is not None:
-            self._epoch_tests[test_num] = reward_total
+            timer["FPS"] = 1 / (datetime.now() - t).total_seconds()
 
-        plt.clf()
-        plt.plot(list(self._epoch_tests.keys()), list(self._epoch_tests.values()))
-        plt.gcf().savefig("plot.png")
+            print(
+                f"\rFPS: {round(timer['FPS'], 4)},\tpredict: {round(timer['predict'], 4)},\tstep: {round(timer['step'], 4)},\tother: {round(timer['other'], 4)},\t[{100 * i / steps_amount}%]",
+                end="              ",
+            )
 
-        return reward_total
+        return self.__reward_preprocess_function(reward_total)

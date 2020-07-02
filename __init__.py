@@ -1,5 +1,1 @@
-"""
-All the stuff from lib will be accessed as Core
-"""
-
-import lib as Core
+from controlled_learning_model import LearningModel
